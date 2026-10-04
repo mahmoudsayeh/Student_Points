@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Points</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🏆</span>
+      <span class="brand-name" data-i18n="brand">Student Points</span>
+    </div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-view="leaderboard" data-i18n="tabLeaderboard">Leaderboard</button>
+      <button class="tab-btn" data-view="exam" data-i18n="tabExam">Exam Grades</button>
+      <button class="tab-btn" data-view="mypoints" data-i18n="tabMyPoints">My Points</button>
+      <button class="tab-btn" data-view="manage" data-i18n="tabManage">Manage Points</button>
+      <button class="tab-btn" data-view="classes" data-i18n="tabClasses">Classes</button>
+      <button class="tab-btn" data-view="wheel" data-i18n="tabWheel">Wheel</button>
+    </nav>
+    <button type="button" id="lang-toggle" class="lang-toggle">العربية</button>
+  </header>
+
+  <main class="container">
+    <section id="leaderboard-view" class="view active">
+      <div class="view-heading">
+        <h1 data-i18n="leaderboardTitle">Class Leaderboard</h1>
+        <p class="subtitle" data-i18n="leaderboardSubtitle">See how every student ranks this term</p>
+      </div>
+
+      <div id="leaderboard-class-filter" class="class-filter-row"></div>
+
+      <div class="shape-toggle">
+        <button type="button" class="shape-btn active" data-shape="podium">
+          <span data-i18n="shapePodium">Podium</span>
+        </button>
+        <button type="button" class="shape-btn" data-shape="mystery">
+          <span data-i18n="shapeMystery">Mystery</span>
+        </button>
+      </div>
+
+      <div id="podium-shape" class="top3-shape"></div>
+      <div id="mystery-shape" class="top3-shape hidden"></div>
+
+      <div id="leaderboard-list" class="card-list">
+        <p class="loading" data-i18n="loading">Loading leaderboard…</p>
+      </div>
+
+      <h2 class="section-heading" data-i18n="classChampionsTitle">🏆 Class Champions</h2>
+      <div id="class-champions" class="class-champions-grid"></div>
+    </section>
+
+    <section id="mypoints-view" class="view">
+      <div class="view-heading">
+        <h1 data-i18n="myPointsTitle">My Points</h1>
+        <p class="subtitle" data-i18n="myPointsSubtitle">Pick your name to see your points and history</p>
+      </div>
+
+      <div id="mypoints-class-filter" class="class-filter-row"></div>
+
+      <div class="picker-row">
+        <select id="student-picker">
+          <option value="" data-i18n="selectYourName">Select your name…</option>
+        </select>
+      </div>
+
+      <div id="mypoints-detail" class="mypoints-detail hidden"></div>
+    </section>
+
+    <section id="manage-view" class="view">
+      <div class="view-heading">
+        <h1 data-i18n="manageTitle">Manage Points</h1>
+        <p class="subtitle" data-i18n="manageSubtitle">Tap a student to add or remove points instantly</p>
+      </div>
+
+      <div id="manage-gate" class="passcode-gate">
+        <div class="passcode-gate-icon">🔒</div>
+        <p class="passcode-gate-text" data-i18n="managePasscodePrompt">Enter the passcode to manage points</p>
+        <form id="manage-passcode-form" class="passcode-gate-form">
+          <input type="password" id="manage-passcode-input" data-i18n-placeholder="passcodePlaceholder" placeholder="Passcode" autocomplete="off" />
+          <button type="submit" class="btn-primary" data-i18n="unlock">Unlock</button>
+        </form>
+        <p class="form-msg" id="manage-passcode-msg"></p>
+      </div>
+
+      <div id="manage-content" class="hidden">
+        <div id="manage-class-filter" class="class-filter-row"></div>
+
+        <div class="picker-row">
+          <input type="text" id="manage-search" data-i18n-placeholder="searchPlaceholder" placeholder="Search students…" />
+        </div>
+
+        <div id="manage-grid" class="manage-grid">
+          <p class="loading" data-i18n="loading">Loading students…</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="classes-view" class="view">
+      <div class="view-heading">
+        <h1 data-i18n="classesTitle">Classes</h1>
+        <p class="subtitle" data-i18n="classesSubtitle">Create a class, then add students to it</p>
+      </div>
+
+      <form id="add-class-form" class="add-class-row">
+        <input type="text" id="new-class-name" data-i18n-placeholder="newClassPlaceholder" placeholder="New class name (e.g. 5A)" maxlength="60" required />
+        <button type="submit" class="btn-icon-add">
+          <span class="btn-icon-glyph">➕</span>
+          <span data-i18n="addClass">Add Class</span>
+        </button>
+      </form>
+      <p class="form-msg" id="add-class-msg"></p>
+
+      <div id="classes-grid" class="manage-grid">
+        <p class="loading" data-i18n="loading">Loading classes…</p>
+      </div>
+    </section>
+
+    <section id="exam-view" class="view">
+      <div class="view-heading">
+        <h1 data-i18n="examTitle">Exam Grades</h1>
+        <p class="subtitle" data-i18n="examSubtitle">Upload exam grades and award points automatically</p>
+      </div>
+
+      <div id="exam-gate" class="passcode-gate">
+        <div class="passcode-gate-icon">🔒</div>
+        <p class="passcode-gate-text" data-i18n="managePasscodePrompt">Enter the passcode to manage points</p>
+        <form id="exam-passcode-form" class="passcode-gate-form">
+          <input type="password" id="exam-passcode-input" data-i18n-placeholder="passcodePlaceholder" placeholder="Passcode" autocomplete="off" />
+          <button type="submit" class="btn-primary" data-i18n="unlock">Unlock</button>
+        </form>
+        <p class="form-msg" id="exam-passcode-msg"></p>
+      </div>
+
+      <div id="exam-content" class="hidden">
+        <div class="exam-scale-box">
+          <p class="exam-scale-title" data-i18n="examScaleTitle">Grading scale (out of 20)</p>
+          <div class="exam-scale-row"><span>20</span><span>→</span><span>+4 <span data-i18n="pts">pts</span></span></div>
+          <div class="exam-scale-row"><span>18–19</span><span>→</span><span>+3 <span data-i18n="pts">pts</span></span></div>
+          <div class="exam-scale-row"><span>17</span><span>→</span><span>+2 <span data-i18n="pts">pts</span></span></div>
+        </div>
+
+        <div class="picker-row">
+          <select id="exam-class-select">
+            <option value="" data-i18n="selectClass">Select a class…</option>
+          </select>
+        </div>
+
+        <div class="file-upload-row">
+          <label class="btn-icon-add file-upload-label" for="exam-file-input">
+            <span class="btn-icon-glyph">📁</span>
+            <span data-i18n="uploadFile">Upload File</span>
+          </label>
+          <input type="file" id="exam-file-input" accept=".xlsx,.xls,.csv" class="visually-hidden" disabled />
+          <span class="file-upload-hint" data-i18n="examFileHint">Two columns: Name, Grade (out of 20)</span>
+        </div>
+        <p class="form-msg" id="exam-msg"></p>
+
+        <div id="exam-results" class="card-list"></div>
+      </div>
+    </section>
+
+    <section id="wheel-view" class="view">
+      <div class="view-heading">
+        <h1 data-i18n="wheelTitle">Wheel of Names</h1>
+        <p class="subtitle" data-i18n="wheelSubtitle">Spin to pick a random student</p>
+      </div>
+
+      <div id="wheel-class-filter" class="class-filter-row"></div>
+
+      <div class="wheel-stage">
+        <div class="wheel-pointer">▼</div>
+        <div class="wheel-wrap">
+          <div id="wheel-disc" class="wheel-disc"></div>
+        </div>
+      </div>
+
+      <div class="wheel-actions">
+        <button type="button" id="wheel-spin-btn" class="btn-icon-add">
+          <span class="btn-icon-glyph">🎡</span>
+          <span data-i18n="spin">Spin</span>
+        </button>
+      </div>
+      <p class="form-msg" id="wheel-msg"></p>
+    </section>
+  </main>
+
+  <div id="detail-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <button type="button" class="modal-close" id="detail-modal-close">✕</button>
+      <div id="detail-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="class-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <button type="button" class="modal-close" id="class-modal-close">✕</button>
+      <div id="class-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="celebration-modal" class="modal-overlay hidden">
+    <div class="confetti-layer" id="confetti-layer"></div>
+    <div class="modal-box celebration-box">
+      <button type="button" class="modal-close" id="celebration-modal-close">✕</button>
+      <div id="celebration-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
