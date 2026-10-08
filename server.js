@@ -15,15 +15,41 @@ try {
   __dirname = process.cwd();
 }
 
+// Values are trimmed and stripped of wrapping quotes, a common copy/paste slip in host dashboards.
+function readEnv(name) {
+  return String(process.env[name] || "")
+    .trim()
+    .replace(/^["']|["']$/g, "");
+}
+
+const SUPABASE_URL = readEnv("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = readEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+function describeConfigError() {
+  const missing = [
+    ["SUPABASE_URL", SUPABASE_URL],
+    ["SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY],
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (!missing.length) return null;
+
+  // Only variable *names* are reported, never values, so a typo'd name is easy to spot.
+  const similar = Object.keys(process.env).filter(
+    (k) => /supa|service|role/i.test(k) && !["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].includes(k)
+  );
+  const hint = similar.length
+    ? `Similar names the server can see: ${similar.join(", ")} — rename to match exactly.`
+    : `The server can't see ${missing.length > 1 ? "them" : "it"}: check ${missing.length > 1 ? "they were" : "it was"} added to this site with scopes including Functions, then redeploy.`;
+  return `Missing ${missing.join(" and ")} — check your .env / host environment variables. ${hint}`;
+}
+
 // Not thrown at load time: in a Netlify Function that only surfaces as an opaque 502. Instead every
 // API request answers with this message (see the middleware below), so the page can show it.
-const configError =
-  !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — check your .env / host environment variables."
-    : null;
+const configError = describeConfigError();
 if (configError) console.error(configError);
 
-const supabase = configError ? null : createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = configError ? null : createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Turns a thrown error (often a Supabase/PostgREST error) into a message the page can display.
 function describeError(err) {
