@@ -15,12 +15,21 @@ try {
   __dirname = process.cwd();
 }
 
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  // Thrown (not process.exit) so this also fails loudly inside a serverless function, not just local dev.
-  throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — check your .env / host environment variables.");
-}
+// Not thrown at load time: in a Netlify Function that only surfaces as an opaque 502. Instead every
+// API request answers with this message (see the middleware below), so the page can show it.
+const configError =
+  !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — check your .env / host environment variables."
+    : null;
+if (configError) console.error(configError);
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = configError ? null : createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+// Turns a thrown error (often a Supabase/PostgREST error) into a message the page can display.
+function describeError(err) {
+  const message = err?.message || String(err || "") || "Server error";
+  return err?.hint ? `${message} (${err.hint})` : message;
+}
 
 const AVATAR_COLORS = ["#8A1538", "#1E88A8", "#2E7D32", "#B8860B", "#6A4C93", "#C2410C", "#2563EB", "#BE185D"];
 
@@ -30,7 +39,8 @@ function randomAvatarColor() {
 
 async function ensureClass(name, cache) {
   if (cache.has(name)) return cache.get(name);
-  const { data: existing } = await supabase.from("classes").select("id").eq("name", name).maybeSingle();
+  const { data: existing, error: existingErr } = await supabase.from("classes").select("id").eq("name", name).maybeSingle();
+  if (existingErr) throw existingErr;
   if (existing) {
     cache.set(name, existing.id);
     return existing.id;
@@ -118,7 +128,7 @@ function asyncHandler(fn) {
   return (req, res, next) =>
     fn(req, res, next).catch((err) => {
       console.error(err);
-      if (!res.headersSent) res.status(500).json({ error: "Server error" });
+      if (!res.headersSent) res.status(500).json({ error: describeError(err) });
     });
 }
 
@@ -130,6 +140,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // file has no top-level await (which breaks Netlify's CommonJS-bundled Functions output).
 let seedPromise = null;
 app.use((req, res, next) => {
+  if (configError) return res.status(500).json({ error: configError });
   if (!seedPromise) seedPromise = seedIfEmpty().catch((err) => console.error("Seed failed:", err));
   seedPromise.then(() => next());
 });
@@ -195,7 +206,8 @@ app.post(
     if (!name) return res.status(400).json({ error: "Class name is required" });
     if (name.length > 60) return res.status(400).json({ error: "Class name is too long" });
 
-    const { data: existing } = await supabase.from("classes").select("id").ilike("name", name).maybeSingle();
+    const { data: existing, error: existingErr } = await supabase.from("classes").select("id").ilike("name", name).maybeSingle();
+    if (existingErr) throw existingErr;
     if (existing) return res.status(409).json({ error: "A class with that name already exists" });
 
     const { data, error } = await supabase.from("classes").insert({ name }).select().single();
@@ -211,7 +223,8 @@ app.get(
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const { data: cls } = await supabase.from("classes").select("id, name").eq("id", id).maybeSingle();
+    const { data: cls, error: clsErr } = await supabase.from("classes").select("id, name").eq("id", id).maybeSingle();
+    if (clsErr) throw clsErr;
     if (!cls) return res.status(404).json({ error: "Class not found" });
 
     const { data: students, error } = await supabase
@@ -232,19 +245,21 @@ app.patch(
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const { data: cls } = await supabase.from("classes").select("id").eq("id", id).maybeSingle();
+    const { data: cls, error: clsErr } = await supabase.from("classes").select("id").eq("id", id).maybeSingle();
+    if (clsErr) throw clsErr;
     if (!cls) return res.status(404).json({ error: "Class not found" });
 
     const name = String(req.body?.name || "").trim();
     if (!name) return res.status(400).json({ error: "Class name is required" });
     if (name.length > 60) return res.status(400).json({ error: "Class name is too long" });
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingErr } = await supabase
       .from("classes")
       .select("id")
       .ilike("name", name)
       .neq("id", id)
       .maybeSingle();
+    if (existingErr) throw existingErr;
     if (existing) return res.status(409).json({ error: "A class with that name already exists" });
 
     const { error } = await supabase.from("classes").update({ name }).eq("id", id);
@@ -261,10 +276,15 @@ app.delete(
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const { data: cls } = await supabase.from("classes").select("id").eq("id", id).maybeSingle();
+    const { data: cls, error: clsErr } = await supabase.from("classes").select("id").eq("id", id).maybeSingle();
+    if (clsErr) throw clsErr;
     if (!cls) return res.status(404).json({ error: "Class not found" });
 
-    const { count } = await supabase.from("students").select("id", { count: "exact", head: true }).eq("class_id", id);
+    const { count, error: countErr } = await supabase
+      .from("students")
+      .select("id", { count: "exact", head: true })
+      .eq("class_id", id);
+    if (countErr) throw countErr;
     if (count > 0) {
       return res.status(409).json({ error: "Remove all students from this class first" });
     }
@@ -306,7 +326,8 @@ app.post(
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const { data: cls } = await supabase.from("classes").select("id").eq("id", id).maybeSingle();
+    const { data: cls, error: clsErr } = await supabase.from("classes").select("id").eq("id", id).maybeSingle();
+    if (clsErr) throw clsErr;
     if (!cls) return res.status(404).json({ error: "Class not found" });
 
     let names = [];
@@ -340,7 +361,8 @@ app.post("/api/classes/:id/students/import", (req, res) => {
       const id = Number(req.params.id);
       if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
 
-      const { data: cls } = await supabase.from("classes").select("id").eq("id", id).maybeSingle();
+      const { data: cls, error: clsErr } = await supabase.from("classes").select("id").eq("id", id).maybeSingle();
+      if (clsErr) throw clsErr;
       if (!cls) return res.status(404).json({ error: "Class not found" });
 
       if (!req.file) return res.status(400).json({ error: "A file is required" });
@@ -361,7 +383,7 @@ app.post("/api/classes/:id/students/import", (req, res) => {
       res.status(201).json(await insertStudentsIntoClass(id, names));
     } catch (e) {
       console.error(e);
-      if (!res.headersSent) res.status(500).json({ error: "Server error" });
+      if (!res.headersSent) res.status(500).json({ error: describeError(e) });
     }
   });
 });
@@ -383,7 +405,8 @@ app.post("/api/classes/:id/exam-import", requireManagePasscode, (req, res) => {
       const classId = Number(req.params.id);
       if (!Number.isInteger(classId)) return res.status(400).json({ error: "Invalid id" });
 
-      const { data: cls } = await supabase.from("classes").select("id").eq("id", classId).maybeSingle();
+      const { data: cls, error: clsErr } = await supabase.from("classes").select("id").eq("id", classId).maybeSingle();
+      if (clsErr) throw clsErr;
       if (!cls) return res.status(404).json({ error: "Class not found" });
 
       if (!req.file) return res.status(400).json({ error: "A file is required" });
@@ -436,7 +459,7 @@ app.post("/api/classes/:id/exam-import", requireManagePasscode, (req, res) => {
       res.status(201).json(results);
     } catch (e) {
       console.error(e);
-      if (!res.headersSent) res.status(500).json({ error: "Server error" });
+      if (!res.headersSent) res.status(500).json({ error: describeError(e) });
     }
   });
 });
@@ -449,7 +472,8 @@ app.delete(
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const { data: student } = await supabase.from("students").select("id").eq("id", id).maybeSingle();
+    const { data: student, error: studentErr } = await supabase.from("students").select("id").eq("id", id).maybeSingle();
+    if (studentErr) throw studentErr;
     if (!student) return res.status(404).json({ error: "Student not found" });
 
     const { error } = await supabase.from("students").delete().eq("id", id);
@@ -466,13 +490,15 @@ app.patch(
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const { data: student } = await supabase.from("students").select("id").eq("id", id).maybeSingle();
+    const { data: student, error: studentErr } = await supabase.from("students").select("id").eq("id", id).maybeSingle();
+    if (studentErr) throw studentErr;
     if (!student) return res.status(404).json({ error: "Student not found" });
 
     const classId = Number(req.body?.classId);
     if (!Number.isInteger(classId)) return res.status(400).json({ error: "A valid classId is required" });
 
-    const { data: cls } = await supabase.from("classes").select("id, name").eq("id", classId).maybeSingle();
+    const { data: cls, error: clsErr } = await supabase.from("classes").select("id, name").eq("id", classId).maybeSingle();
+    if (clsErr) throw clsErr;
     if (!cls) return res.status(404).json({ error: "Class not found" });
 
     const { error } = await supabase.from("students").update({ class_id: classId }).eq("id", id);
@@ -505,7 +531,8 @@ app.get(
 );
 
 async function getStudentOr404(id, res) {
-  const { data: student } = await supabase.from("students").select("id, points").eq("id", id).maybeSingle();
+  const { data: student, error: studentErr } = await supabase.from("students").select("id, points").eq("id", id).maybeSingle();
+  if (studentErr) throw studentErr;
   if (!student) {
     res.status(404).json({ error: "Student not found" });
     return null;
@@ -595,11 +622,12 @@ app.delete(
     const historyId = Number(req.params.historyId);
     if (!Number.isInteger(historyId)) return res.status(400).json({ error: "Invalid id" });
 
-    const { data: entry } = await supabase
+    const { data: entry, error: entryErr } = await supabase
       .from("point_history")
       .select("id, student_id, delta")
       .eq("id", historyId)
       .maybeSingle();
+    if (entryErr) throw entryErr;
     if (!entry) return res.status(404).json({ error: "History entry not found" });
 
     const { data: student, error } = await supabase.from("students").select("points").eq("id", entry.student_id).single();
