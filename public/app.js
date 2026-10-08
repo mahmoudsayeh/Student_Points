@@ -399,9 +399,27 @@ function historyItemHtml(h, { undo } = {}) {
     </div>`;
 }
 
+// Fetches JSON from the API; on failure throws with the server's own error message, or the
+// HTTP status when the response isn't JSON (e.g. a Netlify 502 or function timeout).
+async function fetchJson(url, options) {
+  const res = await fetch(url, options);
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `HTTP ${res.status} ${res.statusText}`.trim());
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+// A "could not load" message followed by the real reason it failed.
+function loadErrorHtml(key, err) {
+  const detail = err && err.message ? `<br /><small>${escapeHtml(err.message)}</small>` : "";
+  return `<p class="empty-state">${t(key)}${detail}</p>`;
+}
+
 async function fetchStudents() {
-  const res = await fetch("/api/students");
-  return res.json();
+  return fetchJson("/api/students");
 }
 
 const RANK_MEDAL = { 1: "🥇", 2: "🥈", 3: "🥉" };
@@ -604,7 +622,7 @@ async function loadLeaderboard() {
     renderLeaderboardClassFilter();
     renderLeaderboardAll();
   } catch (err) {
-    container.innerHTML = `<p class="empty-state">${t("couldNotLoadLeaderboard")}</p>`;
+    container.innerHTML = loadErrorHtml("couldNotLoadLeaderboard", err);
   }
 }
 
@@ -737,9 +755,7 @@ async function loadStudentDetail(id) {
   detail.innerHTML = `<p class="loading">${t("loading")}</p>`;
 
   try {
-    const res = await fetch(`/api/students/${id}`);
-    if (!res.ok) throw new Error("not found");
-    const s = await res.json();
+    const s = await fetchJson(`/api/students/${id}`);
 
     const historyHtml = s.history.length
       ? s.history.map((h) => historyItemHtml(h)).join("")
@@ -760,7 +776,7 @@ async function loadStudentDetail(id) {
       ${historyHtml}
     `;
   } catch (err) {
-    detail.innerHTML = `<p class="empty-state">${t("couldNotLoadPoints")}</p>`;
+    detail.innerHTML = loadErrorHtml("couldNotLoadPoints", err);
   }
 }
 
@@ -874,7 +890,7 @@ async function loadManageGrid() {
       .join("");
     applyManageFilters();
   } catch (err) {
-    manageGrid.innerHTML = `<p class="empty-state">${t("couldNotLoadStudents")}</p>`;
+    manageGrid.innerHTML = loadErrorHtml("couldNotLoadStudents", err);
   }
 }
 
@@ -977,7 +993,7 @@ function classCardHtml(c) {
 
 async function loadClasses() {
   try {
-    const classes = await fetch("/api/classes").then((r) => r.json());
+    const classes = await fetchJson("/api/classes");
     allClassesCache = classes;
     classesGrid.innerHTML = classes.length
       ? classes.map(classCardHtml).join("")
@@ -994,7 +1010,7 @@ async function loadClasses() {
     renderClassChampions();
     renderWheelClassFilter();
   } catch (err) {
-    classesGrid.innerHTML = `<p class="empty-state">${t("couldNotLoadClasses")}</p>`;
+    classesGrid.innerHTML = loadErrorHtml("couldNotLoadClasses", err);
   }
 }
 
@@ -1079,9 +1095,7 @@ async function openClassModal(id) {
   classModalBody.innerHTML = `<p class="loading">${t("loading")}</p>`;
 
   try {
-    const res = await fetch(`/api/classes/${id}`);
-    if (!res.ok) throw new Error("not found");
-    const cls = await res.json();
+    const cls = await fetchJson(`/api/classes/${id}`);
 
     const rosterHtml = cls.students.length
       ? cls.students.map(classRosterItemHtml).join("")
@@ -1130,7 +1144,7 @@ async function openClassModal(id) {
     currentClassName = cls.name;
     bindClassModalEvents();
   } catch (err) {
-    classModalBody.innerHTML = `<p class="empty-state">${t("couldNotLoadClass")}</p>`;
+    classModalBody.innerHTML = loadErrorHtml("couldNotLoadClass", err);
   }
 }
 
@@ -1606,9 +1620,7 @@ async function openDetailModal(id) {
   detailBody.innerHTML = `<p class="loading">${t("loading")}</p>`;
 
   try {
-    const res = await fetch(`/api/students/${id}`);
-    if (!res.ok) throw new Error("not found");
-    const s = await res.json();
+    const s = await fetchJson(`/api/students/${id}`);
 
     const historyHtml = s.history.length
       ? s.history.map((h) => historyItemHtml(h, { undo: true })).join("")
@@ -1650,7 +1662,7 @@ async function openDetailModal(id) {
     document.getElementById("award-form").addEventListener("submit", handleAwardSubmit);
     document.getElementById("set-form").addEventListener("submit", handleSetSubmit);
   } catch (err) {
-    detailBody.innerHTML = `<p class="empty-state">${t("couldNotLoadStudent")}</p>`;
+    detailBody.innerHTML = loadErrorHtml("couldNotLoadStudent", err);
   }
 }
 
