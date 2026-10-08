@@ -19,29 +19,48 @@ try {
 function readEnv(name) {
   return String(process.env[name] || "")
     .trim()
-    .replace(/^["']|["']$/g, "");
+    .replace(/^["']|["']$/g, "")
+    .trim();
 }
 
-const SUPABASE_URL = readEnv("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = readEnv("SUPABASE_SERVICE_ROLE_KEY");
+// The first of `names` that holds a non-empty value. Supabase's dashboard now calls the server key
+// the "secret" key (sb_secret_…), so the other common names it gets saved under are accepted too.
+function readFirstEnv(names) {
+  for (const name of names) {
+    const value = readEnv(name);
+    if (value) return value;
+  }
+  return "";
+}
 
+const ENV_NAMES = {
+  SUPABASE_URL: ["SUPABASE_URL"],
+  SUPABASE_SERVICE_ROLE_KEY: ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_KEY"],
+};
+
+const SUPABASE_URL = readFirstEnv(ENV_NAMES.SUPABASE_URL);
+const SUPABASE_SERVICE_ROLE_KEY = readFirstEnv(ENV_NAMES.SUPABASE_SERVICE_ROLE_KEY);
+
+// Only variable *names* are ever reported, never values.
 function describeConfigError() {
-  const missing = [
-    ["SUPABASE_URL", SUPABASE_URL],
-    ["SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY],
-  ]
+  const missing = Object.entries({ SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY })
     .filter(([, value]) => !value)
     .map(([name]) => name);
   if (!missing.length) return null;
 
-  // Only variable *names* are reported, never values, so a typo'd name is easy to spot.
-  const similar = Object.keys(process.env).filter(
-    (k) => /supa|service|role/i.test(k) && !["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].includes(k)
-  );
-  const hint = similar.length
-    ? `Similar names the server can see: ${similar.join(", ")} — rename to match exactly.`
-    : `The server can't see ${missing.length > 1 ? "them" : "it"}: check ${missing.length > 1 ? "they were" : "it was"} added to this site with scopes including Functions, then redeploy.`;
-  return `Missing ${missing.join(" and ")} — check your .env / host environment variables. ${hint}`;
+  const accepted = Object.values(ENV_NAMES).flat();
+  const problems = missing.map((name) => {
+    // Present but blank: on Netlify this is usually "different value per deploy context" with this
+    // site's context (Production, Deploy previews…) left empty.
+    const blank = ENV_NAMES[name].filter((n) => n in process.env);
+    if (blank.length) return `${blank.join(" / ")} is set but its value is empty for this deploy`;
+    const similar = Object.keys(process.env).filter((k) => /supa|service|secret|role/i.test(k) && !accepted.includes(k));
+    if (similar.length) return `${name} is not set (similar names the server sees: ${similar.join(", ")} — rename to match exactly)`;
+    return `${name} is not set on this site`;
+  });
+
+  const site = process.env.SITE_NAME ? ` (Netlify site "${process.env.SITE_NAME}")` : "";
+  return `Server is missing its Supabase settings${site}: ${problems.join("; ")}. Add ${missing.length > 1 ? "them" : "it"} under Site configuration → Environment variables with the Functions scope and the same value for every deploy context, then redeploy.`;
 }
 
 // Not thrown at load time: in a Netlify Function that only surfaces as an opaque 502. Instead every
