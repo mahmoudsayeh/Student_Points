@@ -5,6 +5,7 @@ import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import multer from "multer";
 import * as XLSX from "xlsx";
+import buildTimeEnv from "./runtime-env.js";
 
 // `import.meta.url` is emptied out by Netlify's CommonJS function bundler; fall back to cwd
 // there rather than crash — that build only ever calls the API routes, never express.static.
@@ -15,9 +16,10 @@ try {
   __dirname = process.cwd();
 }
 
+// Runtime env first, then the values captured at build time (see scripts/write-runtime-env.mjs).
 // Values are trimmed and stripped of wrapping quotes, a common copy/paste slip in host dashboards.
 function readEnv(name) {
-  return String(process.env[name] || "")
+  return String(process.env[name] || buildTimeEnv[name] || "")
     .trim()
     .replace(/^["']|["']$/g, "");
 }
@@ -40,7 +42,7 @@ function describeConfigError() {
   );
   const hint = similar.length
     ? `Similar names the server can see: ${similar.join(", ")} — rename to match exactly.`
-    : `The server can't see ${missing.length > 1 ? "them" : "it"}: check ${missing.length > 1 ? "they were" : "it was"} added to this site with scopes including Functions, then redeploy.`;
+    : `The server can't see ${missing.length > 1 ? "them" : "it"}: check ${missing.length > 1 ? "they were" : "it was"} added to this site (Site configuration → Environment variables), then redeploy. The Netlify deploy log lists which ones it found.`;
   return `Missing ${missing.join(" and ")} — check your .env / host environment variables. ${hint}`;
 }
 
@@ -140,7 +142,7 @@ async function seedIfEmpty() {
 
 // Simple shared passcode gating access to the point-awarding actions ("Manage Points").
 // Override with a real value via the MANAGE_PASSCODE env var; this default is only for local/demo use.
-const MANAGE_PASSCODE = process.env.MANAGE_PASSCODE || "1234";
+const MANAGE_PASSCODE = readEnv("MANAGE_PASSCODE") || "1234";
 
 function requireManagePasscode(req, res, next) {
   if (req.get("X-Manage-Passcode") !== MANAGE_PASSCODE) {
