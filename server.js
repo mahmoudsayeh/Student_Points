@@ -3,8 +3,6 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
-import multer from "multer";
-import * as XLSX from "xlsx";
 import buildTimeEnv from "./runtime-env.js";
 
 // `import.meta.url` is emptied out by Netlify's CommonJS function bundler; fall back to cwd
@@ -65,80 +63,9 @@ function randomAvatarColor() {
   return AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
 }
 
-async function ensureClass(name, cache) {
-  if (cache.has(name)) return cache.get(name);
-  const { data: existing, error: existingErr } = await supabase.from("classes").select("id").eq("name", name).maybeSingle();
-  if (existingErr) throw existingErr;
-  if (existing) {
-    cache.set(name, existing.id);
-    return existing.id;
-  }
-  const { data, error } = await supabase.from("classes").insert({ name }).select().single();
-  if (error) throw error;
-  cache.set(name, data.id);
-  return data.id;
-}
-
-// Seed a fresh (empty) Supabase project with the same demo data the app used to ship with locally.
-async function seedIfEmpty() {
-  const { count, error } = await supabase.from("students").select("id", { count: "exact", head: true });
-  if (error) throw error;
-  if (count > 0) return;
-
-  const seedStudents = [
-    { name: "Rashid Al-Kaabi", grade: "5A" },
-    { name: "Maryam Al-Sulaiti", grade: "5A" },
-    { name: "Khalid Al-Emadi", grade: "5B" },
-    { name: "Fatima Al-Marri", grade: "5B" },
-    { name: "Hamad Al-Attiyah", grade: "5A" },
-    { name: "Noor Al-Kuwari", grade: "5C" },
-    { name: "Abdulaziz Al-Naimi", grade: "5B" },
-    { name: "Sara Al-Hajri", grade: "5C" },
-  ];
-
-  const reasons = [
-    "Homework completed",
-    "Helped a classmate",
-    "Top quiz score",
-    "Good behavior",
-    "Class participation",
-    "Perfect attendance",
-    "Reading challenge",
-    "Science fair project",
-  ];
-
-  const classCache = new Map();
-
-  for (let i = 0; i < seedStudents.length; i++) {
-    const s = seedStudents[i];
-    const color = AVATAR_COLORS[i % AVATAR_COLORS.length];
-    const classId = await ensureClass(s.grade, classCache);
-
-    const { data: student, error: insErr } = await supabase
-      .from("students")
-      .insert({ name: s.name, class_id: classId, avatar_color: color, points: 0 })
-      .select()
-      .single();
-    if (insErr) throw insErr;
-
-    const numEvents = 3 + (i % 4);
-    const daysAgo = (d) => new Date(Date.now() - d * 86400000).toISOString();
-
-    let points = 0;
-    for (let e = 0; e < numEvents; e++) {
-      const delta = [5, 10, 15, 20, 25][(i + e) % 5];
-      const reason = reasons[(i + e) % reasons.length];
-      await supabase.from("point_history").insert({
-        student_id: student.id,
-        delta,
-        reason,
-        created_at: daysAgo(numEvents - e),
-      });
-      points += delta;
-    }
-    await supabase.from("students").update({ points }).eq("id", student.id);
-  }
-}
+// Lists are cached at the host's edge for a short time so most visitors skip the database round trip.
+// The page adds ?w=<last write time> after its own writes, so the person who just edited never sees stale data.
+const LIST_CACHE = "public, s-maxage=30, stale-while-revalidate=300";
 
 // Wraps an async route handler so a rejected promise becomes a clean 500 instead of hanging/crashing.
 function asyncHandler(fn) {
@@ -153,13 +80,9 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// Run the demo-data seed once, lazily, before the first request — not at module load, so this
-// file has no top-level await (which breaks Netlify's CommonJS-bundled Functions output).
-let seedPromise = null;
 app.use((req, res, next) => {
   if (configError) return res.status(500).json({ error: configError });
-  if (!seedPromise) seedPromise = seedIfEmpty().catch((err) => console.error("Seed failed:", err));
-  seedPromise.then(() => next());
+  next();
 });
 
 async function studentsRanked() {
@@ -184,6 +107,7 @@ async function studentsRanked() {
 app.get(
   "/api/students",
   asyncHandler(async (req, res) => {
+    res.set("Cache-Control", LIST_CACHE);
     res.json(await studentsRanked());
   })
 );
@@ -191,21 +115,15 @@ app.get(
 // ---- Classes ----
 
 async function classesWithCounts() {
-  const { data: classes, error } = await supabase.from("classes").select("id, name").order("name", { ascending: true });
+  const { data, error } = await supabase.from("classes").select("id, name, students(count)").order("name", { ascending: true });
   if (error) throw error;
-
-  const { data: students, error: sErr } = await supabase.from("students").select("class_id");
-  if (sErr) throw sErr;
-
-  const counts = new Map();
-  students.forEach((s) => counts.set(s.class_id, (counts.get(s.class_id) || 0) + 1));
-
-  return classes.map((c) => ({ id: c.id, name: c.name, studentCount: counts.get(c.id) || 0 }));
+  return data.map((c) => ({ id: c.id, name: c.name, studentCount: c.students?.[0]?.count ?? 0 }));
 }
 
 app.get(
   "/api/classes",
   asyncHandler(async (req, res) => {
+    res.set("Cache-Control", LIST_CACHE);
     res.json(await classesWithCounts());
   })
 );
@@ -354,17 +272,25 @@ app.post(
   })
 );
 
-const fileUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const ok = /\.(xlsx|xls|csv)$/i.test(file.originalname);
-    cb(ok ? null : new Error("Only .xlsx, .xls, or .csv files are allowed"), ok);
-  },
-});
+// multer and xlsx are heavy; load them on first import request, not on every function cold start.
+let fileUploadPromise = null;
+function getFileUpload() {
+  fileUploadPromise ??= import("multer").then(({ default: multer }) =>
+    multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 2 * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        const ok = /.(xlsx|xls|csv)$/i.test(file.originalname);
+        cb(ok ? null : new Error("Only .xlsx, .xls, or .csv files are allowed"), ok);
+      },
+    })
+  );
+  return fileUploadPromise;
+}
 
 // Add students to a class in bulk from an uploaded Excel/CSV file (one name per row, first column).
-app.post("/api/classes/:id/students/import", (req, res) => {
+app.post("/api/classes/:id/students/import", async (req, res) => {
+  const fileUpload = await getFileUpload();
   fileUpload.single("file")(req, res, async (err) => {
     try {
       if (err) return res.status(400).json({ error: err.message || "Upload failed" });
@@ -380,6 +306,7 @@ app.post("/api/classes/:id/students/import", (req, res) => {
 
       let names;
       try {
+        const XLSX = await import("xlsx");
         const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
@@ -408,7 +335,8 @@ function pointsForGrade(grade) {
 }
 
 // Import exam grades for a class from a file (Name, Grade columns) and award points automatically.
-app.post("/api/classes/:id/exam-import", (req, res) => {
+app.post("/api/classes/:id/exam-import", async (req, res) => {
+  const fileUpload = await getFileUpload();
   fileUpload.single("file")(req, res, async (err) => {
     try {
       if (err) return res.status(400).json({ error: err.message || "Upload failed" });
@@ -424,6 +352,7 @@ app.post("/api/classes/:id/exam-import", (req, res) => {
 
       let rows;
       try {
+        const XLSX = await import("xlsx");
         const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });

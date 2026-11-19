@@ -1,3 +1,20 @@
+// ---- drawn icons (one stroke weight, inherit colour) ----
+const ICON_PATHS = {
+  layers: '<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 13 9 5 9-5"/>',
+  school: '<path d="M3 21h18"/><path d="M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/><path d="M12 11h.01"/>',
+  trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="m6 7 1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+  pencil: '<path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
+  check: '<path d="m5 12 5 5 9-10"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  spin: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v5h-5"/>',
+  crown: '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8Z"/>',
+};
+function icon(name) {
+  return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
+}
+
 // ---- i18n ----
 
 const I18N = {
@@ -15,7 +32,7 @@ const I18N = {
     wheelWinnerTitle: "🎉 The wheel picked…",
     wheelWinnerMsg: "Good luck! 🍀",
     wheelNeedNames: "Add at least 2 students to spin the wheel.",
-    classChampionsTitle: "🏆 Class Champions",
+    classChampionsTitle: "Class Champions",
     noChampionsYet: "No classes have students yet.",
     deleteStudent: "Delete student",
     confirmDeleteStudent: "Delete {name}? This removes their points history too. This can't be undone.",
@@ -121,6 +138,11 @@ const I18N = {
     tierGold: "Gold",
     tierSilver: "Silver",
     tierBronze: "Bronze",
+    footerText: "Student Points — classroom rewards, made simple.",
+    statStudents: "Students",
+    statClasses: "Classes",
+    statPoints: "Total points",
+    statTopClass: "Leading class",
   },
   ar: {
     brand: "نقاط الطلاب",
@@ -136,7 +158,7 @@ const I18N = {
     wheelWinnerTitle: "🎉 اختارت العجلة…",
     wheelWinnerMsg: "بالتوفيق! 🍀",
     wheelNeedNames: "أضف طالبين على الأقل لتدوير العجلة.",
-    classChampionsTitle: "🏆 أبطال الصفوف",
+    classChampionsTitle: "أبطال الصفوف",
     noChampionsYet: "لا يوجد صفوف بها طلاب بعد.",
     deleteStudent: "حذف الطالب",
     confirmDeleteStudent: "حذف {name}؟ سيؤدي هذا أيضاً لحذف سجل نقاطه. لا يمكن التراجع عن هذا.",
@@ -242,6 +264,11 @@ const I18N = {
     tierGold: "ذهبي",
     tierSilver: "فضي",
     tierBronze: "برونزي",
+    footerText: "نقاط الطلاب — مكافآت الصف، ببساطة.",
+    statStudents: "الطلاب",
+    statClasses: "الصفوف",
+    statPoints: "مجموع النقاط",
+    statTopClass: "الصف المتصدر",
   },
 };
 
@@ -366,10 +393,10 @@ function rankSuffix(rank) {
 }
 
 function tierFor(points) {
-  if (points >= 90) return { icon: "💎", label: t("tierPlatinum") };
-  if (points >= 70) return { icon: "🏅", label: t("tierGold") };
-  if (points >= 50) return { icon: "🥈", label: t("tierSilver") };
-  return { icon: "🎖️", label: t("tierBronze") };
+  if (points >= 90) return { icon: '<i class="tier-dot tier-platinum"></i>', label: t("tierPlatinum") };
+  if (points >= 70) return { icon: '<i class="tier-dot tier-gold"></i>', label: t("tierGold") };
+  if (points >= 50) return { icon: '<i class="tier-dot tier-silver"></i>', label: t("tierSilver") };
+  return { icon: '<i class="tier-dot tier-bronze"></i>', label: t("tierBronze") };
 }
 
 function formatDate(sqlDate) {
@@ -418,11 +445,47 @@ function loadErrorHtml(key, err) {
   return `<p class="empty-state">${t(key)}${detail}</p>`;
 }
 
-async function fetchStudents() {
-  return fetchJson("/api/students");
+// The page asks for the student list from several places at startup. Share one request while it is
+// in flight, but never reuse a read that began before a write finished (dataVersion tracks writes).
+let dataVersion = 0;
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  const request = nativeFetch(input, init);
+  if ((init?.method || "GET").toUpperCase() !== "GET") {
+    request.finally(() => {
+      dataVersion++;
+      try { localStorage.setItem("sp:lastWrite", String(Date.now())); } catch {}
+    }).catch(() => {});
+  }
+  return request;
+};
+
+// After this browser writes something, list URLs get ?w=<time> so they bypass the shared edge cache.
+function listUrl(path) {
+  try {
+    const w = localStorage.getItem("sp:lastWrite");
+    return w ? `${path}?w=${w}` : path;
+  } catch {
+    return path;
+  }
 }
 
-const RANK_MEDAL = { 1: "🥇", 2: "🥈", 3: "🥉" };
+let studentsInFlight = null;
+let studentsInFlightVersion = -1;
+function fetchStudents() {
+  if (studentsInFlight && studentsInFlightVersion === dataVersion) return studentsInFlight;
+  studentsInFlightVersion = dataVersion;
+  const request = fetchJson(listUrl("/api/students"));
+  studentsInFlight = request;
+  request.finally(() => { if (studentsInFlight === request) studentsInFlight = null; }).catch(() => {});
+  return request;
+}
+
+const RANK_MEDAL = {
+  1: '<span class="medal medal-1">1</span>',
+  2: '<span class="medal medal-2">2</span>',
+  3: '<span class="medal medal-3">3</span>',
+};
 
 // ---- Leaderboard ----
 
@@ -474,7 +537,7 @@ function renderTop3() {
 function podiumColHtml(s, place) {
   if (!s) return "";
   const tier = tierFor(s.points);
-  const crown = place === 1 ? '<div class="podium-crown">👑</div>' : "";
+  const crown = place === 1 ? `<div class="podium-crown">${icon("crown")}</div>` : "";
   return `
     <div class="podium-col place-${place}" data-id="${s.id}">
       ${crown}
@@ -550,6 +613,7 @@ function renderLeaderboardList() {
   const container = document.getElementById("leaderboard-list");
   const list = getFilteredLeaderboard();
   const rest = list.filter((s) => s.rank > 3);
+  const maxPoints = Math.max(1, ...list.map((s) => s.points));
 
   if (!rest.length) {
     container.innerHTML = list.length ? "" : `<p class="empty-state">${t("noStudentsYet")}</p>`;
@@ -565,6 +629,7 @@ function renderLeaderboardList() {
         <div class="card-info">
           <div class="card-name">${escapeHtml(s.name)}</div>
           <div class="card-grade">${escapeHtml(s.class_name)}</div>
+          <div class="rank-bar"><i style="width:${Math.round((s.points / maxPoints) * 100)}%"></i></div>
         </div>
         <div class="card-points">${s.points} ${t("pts")}</div>
       </div>`;
@@ -572,7 +637,48 @@ function renderLeaderboardList() {
     .join("");
 }
 
+function renderStatCards() {
+  const el = document.getElementById("stat-cards");
+  if (!el) return;
+
+  const byClass = new Map();
+  leaderboardCache.forEach((s) => byClass.set(s.class_name, (byClass.get(s.class_name) || 0) + s.points));
+  const shares = [...byClass.entries()].filter(([, pts]) => pts > 0).sort((a, b) => b[1] - a[1]);
+  const totalPoints = leaderboardCache.reduce((n, s) => n + s.points, 0);
+  const lead = shares[0];
+
+  const segments = shares
+    .map(([name, pts], i) => `<i class="seg seg-${i % 6}" style="flex-grow:${pts}" title="${escapeHtml(name)}: ${pts}"></i>`)
+    .join("");
+  const legend = shares
+    .slice(0, 3)
+    .map(([name, pts], i) => `<span><b class="dot seg-${i % 6}"></b>${escapeHtml(name)} · ${pts}</span>`)
+    .join("");
+
+  el.innerHTML = `
+    <div class="stat-card stat-wide">
+      <div class="stat-label">${t("statPoints")}</div>
+      <div class="stat-value">${totalPoints}</div>
+      <div class="share-bar">${segments}</div>
+      <div class="share-legend">${legend}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">${t("statStudents")}</div>
+      <div class="stat-value">${leaderboardCache.length}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">${t("statClasses")}</div>
+      <div class="stat-value">${allClassesCache.length}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">${t("statTopClass")}</div>
+      <div class="stat-value stat-text">${lead ? escapeHtml(lead[0]) : "—"}</div>
+      <div class="stat-note">${lead ? `${lead[1]} ${t("pts")}` : ""}</div>
+    </div>`;
+}
+
 function renderLeaderboardAll() {
+  renderStatCards();
   renderTop3();
   renderLeaderboardList();
   renderClassChampions();
@@ -608,7 +714,7 @@ function renderClassChampions() {
 
       return `
         <div class="champion-card">
-          <div class="champion-class-name">🏫 ${escapeHtml(c.name)}</div>
+          <div class="champion-class-name">${icon("school")}<span>${escapeHtml(c.name)}</span></div>
           ${rows}
         </div>`;
     })
@@ -834,11 +940,11 @@ async function loadManageGrid() {
 
 // Shared icon-button class picker, reused by Leaderboard, My Points, and Manage Points.
 function renderClassFilterButtons(container, activeId, onSelect) {
-  const allBtn = `<button type="button" class="shape-btn ${activeId === null ? "active" : ""}" data-class-id="">📚 ${t("allClasses")}</button>`;
+  const allBtn = `<button type="button" class="shape-btn ${activeId === null ? "active" : ""}" data-class-id="">${icon("layers")}<span>${t("allClasses")}</span></button>`;
   const classBtns = allClassesCache
     .map(
       (c) =>
-        `<button type="button" class="shape-btn ${activeId === c.id ? "active" : ""}" data-class-id="${c.id}">🏫 ${escapeHtml(c.name)}</button>`
+        `<button type="button" class="shape-btn ${activeId === c.id ? "active" : ""}" data-class-id="${c.id}">${icon("school")}<span>${escapeHtml(c.name)}</span></button>`
     )
     .join("");
   container.innerHTML = allBtn + classBtns;
@@ -922,7 +1028,7 @@ let allClassesCache = [];
 function classCardHtml(c) {
   return `
     <div class="class-card" data-id="${c.id}">
-      <div class="class-icon">🏫</div>
+      <div class="class-icon">${icon("school")}</div>
       <div class="class-name">${escapeHtml(c.name)}</div>
       <div class="class-count">${t("studentsCount", { n: c.studentCount, s: c.studentCount === 1 ? "" : "s" })}</div>
     </div>`;
@@ -930,7 +1036,7 @@ function classCardHtml(c) {
 
 async function loadClasses() {
   try {
-    const classes = await fetchJson("/api/classes");
+    const classes = await fetchJson(listUrl("/api/classes"));
     allClassesCache = classes;
     classesGrid.innerHTML = classes.length
       ? classes.map(classCardHtml).join("")
@@ -945,6 +1051,7 @@ async function loadClasses() {
     renderMyPointsClassFilter();
     renderExamClassOptions();
     renderClassChampions();
+    renderStatCards();
     renderWheelClassFilter();
   } catch (err) {
     classesGrid.innerHTML = loadErrorHtml("couldNotLoadClasses", err);
@@ -1007,7 +1114,7 @@ function classRosterItemHtml(s) {
         <option value="">${t("moveTo")}</option>
         ${moveOptions}
       </select>
-      <button type="button" class="icon-btn icon-btn-danger delete-student-btn" data-student-id="${s.id}" data-student-name="${escapeHtml(s.name)}" title="${t("deleteStudent")}">🗑️</button>
+      <button type="button" class="icon-btn icon-btn-danger delete-student-btn" data-student-id="${s.id}" data-student-name="${escapeHtml(s.name)}" title="${t("deleteStudent")}" aria-label="${t("deleteStudent")}">${icon("trash")}</button>
     </div>`;
 }
 
@@ -1016,7 +1123,7 @@ function studentRowHtml(rowIndex, value = "") {
     <tr class="student-row">
       <td class="row-index">${rowIndex}</td>
       <td><input type="text" class="student-name-input" placeholder="${t("studentNamePlaceholder")}" maxlength="80" value="${escapeHtml(value)}" /></td>
-      <td><button type="button" class="row-remove-btn" title="✕">✕</button></td>
+      <td><button type="button" class="row-remove-btn" aria-label="Remove row">${icon("x")}</button></td>
     </tr>`;
 }
 
@@ -1042,8 +1149,8 @@ async function openClassModal(id) {
       <div class="summary-card">
         <div class="class-name-row" id="class-name-row">
           <span class="class-name-display" id="class-name-display">${escapeHtml(cls.name)}</span>
-          <button type="button" class="icon-btn" id="rename-class-btn" title="${t("rename")}">✏️</button>
-          <button type="button" class="icon-btn icon-btn-danger" id="delete-class-btn" title="${t("deleteClass")}">🗑️</button>
+          <button type="button" class="icon-btn" id="rename-class-btn" title="${t("rename")}" aria-label="${t("rename")}">${icon("pencil")}</button>
+          <button type="button" class="icon-btn icon-btn-danger" id="delete-class-btn" title="${t("deleteClass")}" aria-label="${t("deleteClass")}">${icon("trash")}</button>
         </div>
         <div class="summary-label">${t("studentsCount", { n: cls.students.length, s: cls.students.length === 1 ? "" : "s" })}</div>
       </div>
@@ -1055,7 +1162,7 @@ async function openClassModal(id) {
       <h2 class="form-title">${t("addStudents")}</h2>
       <div class="file-upload-row">
         <label class="btn-icon-add file-upload-label" for="student-file-input">
-          <span class="btn-icon-glyph">📁</span>
+          <span class="btn-icon-glyph">${icon("upload")}</span>
           <span>${t("uploadFile")}</span>
         </label>
         <input type="file" id="student-file-input" accept=".xlsx,.xls,.csv" class="visually-hidden" />
@@ -1071,7 +1178,7 @@ async function openClassModal(id) {
       <div class="add-students-actions">
         <button type="button" class="card-link" id="add-row-btn">+ ${t("addRow")}</button>
         <button type="button" class="btn-icon-add" id="submit-students-btn">
-          <span class="btn-icon-glyph">➕</span>
+          <span class="btn-icon-glyph">${icon("plus")}</span>
           <span>${t("addStudents")}</span>
         </button>
       </div>
@@ -1203,8 +1310,8 @@ function enterRenameMode() {
   const row = document.getElementById("class-name-row");
   row.innerHTML = `
     <input type="text" id="class-rename-input" value="${escapeHtml(currentClassName)}" maxlength="60" />
-    <button type="button" class="icon-btn" id="save-rename-btn" title="${t("save")}">✔️</button>
-    <button type="button" class="icon-btn" id="cancel-rename-btn" title="${t("cancel")}">✕</button>
+    <button type="button" class="icon-btn" id="save-rename-btn" title="${t("save")}" aria-label="${t("save")}">${icon("check")}</button>
+    <button type="button" class="icon-btn" id="cancel-rename-btn" title="${t("cancel")}" aria-label="${t("cancel")}">${icon("x")}</button>
   `;
   const input = document.getElementById("class-rename-input");
   input.focus();
@@ -1310,7 +1417,7 @@ function renderExamClassOptions() {
   allClassesCache.forEach((c) => {
     const opt = document.createElement("option");
     opt.value = c.id;
-    opt.textContent = `🏫 ${c.name}`;
+    opt.textContent = c.name;
     examClassSelect.appendChild(opt);
   });
   if (Array.from(examClassSelect.options).some((o) => o.value === previous)) {

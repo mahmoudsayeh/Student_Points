@@ -3,5 +3,24 @@
   "buildCommand": "",
   "installCommand": "npm install",
   "outputDirectory": "public",
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }]
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "regions": [
+    "bom1"
+  ],
+  "headers": [
+    {
+      "source": "/(app.js|styles.css)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300, stale-while-revalidate=86400"
+        }
+      ]
+    }
+  ]
 }

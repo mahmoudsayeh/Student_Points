@@ -9,3 +9,5 @@ migrate-to-supabase.mjs
 .env.local
 .vercel
 scripts
+.impeccable
+PRODUCT.md
