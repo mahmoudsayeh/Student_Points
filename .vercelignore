@@ -1,0 +1,11 @@
+.env
+node_modules
+data
+netlify
+.netlify
+netlify.toml
+deno.lock
+migrate-to-supabase.mjs
+.env.local
+.vercel
+scripts

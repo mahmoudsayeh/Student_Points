@@ -140,17 +140,6 @@ async function seedIfEmpty() {
   }
 }
 
-// Simple shared passcode gating access to the point-awarding actions ("Manage Points").
-// Override with a real value via the MANAGE_PASSCODE env var; this default is only for local/demo use.
-const MANAGE_PASSCODE = readEnv("MANAGE_PASSCODE") || "1234";
-
-function requireManagePasscode(req, res, next) {
-  if (req.get("X-Manage-Passcode") !== MANAGE_PASSCODE) {
-    return res.status(401).json({ error: "Incorrect passcode" });
-  }
-  next();
-}
-
 // Wraps an async route handler so a rejected promise becomes a clean 500 instead of hanging/crashing.
 function asyncHandler(fn) {
   return (req, res, next) =>
@@ -171,12 +160,6 @@ app.use((req, res, next) => {
   if (configError) return res.status(500).json({ error: configError });
   if (!seedPromise) seedPromise = seedIfEmpty().catch((err) => console.error("Seed failed:", err));
   seedPromise.then(() => next());
-});
-
-app.post("/api/verify-passcode", (req, res) => {
-  const passcode = String(req.body?.passcode || "");
-  if (passcode === MANAGE_PASSCODE) return res.json({ ok: true });
-  res.status(401).json({ error: "Incorrect passcode" });
 });
 
 async function studentsRanked() {
@@ -425,7 +408,7 @@ function pointsForGrade(grade) {
 }
 
 // Import exam grades for a class from a file (Name, Grade columns) and award points automatically.
-app.post("/api/classes/:id/exam-import", requireManagePasscode, (req, res) => {
+app.post("/api/classes/:id/exam-import", (req, res) => {
   fileUpload.single("file")(req, res, async (err) => {
     try {
       if (err) return res.status(400).json({ error: err.message || "Upload failed" });
@@ -495,7 +478,6 @@ app.post("/api/classes/:id/exam-import", requireManagePasscode, (req, res) => {
 // Permanently delete a student and their point history (cascade-deleted by the DB).
 app.delete(
   "/api/students/:id",
-  requireManagePasscode,
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
@@ -590,7 +572,6 @@ async function applyPointsDelta(id, delta, reason) {
 // Award or deduct points (delta can be negative), recorded with a reason.
 app.post(
   "/api/students/:id/points",
-  requireManagePasscode,
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
@@ -614,7 +595,6 @@ app.post(
 // Directly set a student's total (e.g. correcting a mistake); still logged to history.
 app.patch(
   "/api/students/:id/points",
-  requireManagePasscode,
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
@@ -645,7 +625,6 @@ app.patch(
 // Undo one history entry, reversing its effect on the student's total.
 app.delete(
   "/api/history/:historyId",
-  requireManagePasscode,
   asyncHandler(async (req, res) => {
     const historyId = Number(req.params.historyId);
     if (!Number.isInteger(historyId)) return res.status(400).json({ error: "Invalid id" });

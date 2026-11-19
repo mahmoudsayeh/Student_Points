@@ -298,7 +298,7 @@ function setLang(newLang) {
   closeClassModal();
 
   loadLeaderboard();
-  if (isManageUnlocked()) loadManageGrid();
+  loadManageGrid();
   loadClasses();
   renderMyPointsClassFilter();
   if (lastExamResults) renderExamResults(lastExamResults);
@@ -792,71 +792,9 @@ document.getElementById("student-picker").addEventListener("change", (e) => {
 
 // ---- Manage Points passcode gate ----
 
-const MANAGE_PASSCODE_KEY = "student-points:managePasscode";
-const manageGateEl = document.getElementById("manage-gate");
-const manageContentEl = document.getElementById("manage-content");
-const managePasscodeForm = document.getElementById("manage-passcode-form");
-const managePasscodeInput = document.getElementById("manage-passcode-input");
-const managePasscodeMsg = document.getElementById("manage-passcode-msg");
-
-function isManageUnlocked() {
-  return !!sessionStorage.getItem(MANAGE_PASSCODE_KEY);
-}
-
-function managePasscodeHeader() {
-  const code = sessionStorage.getItem(MANAGE_PASSCODE_KEY);
-  return code ? { "X-Manage-Passcode": code } : {};
-}
-
-function showManageGate() {
-  manageGateEl.classList.remove("hidden");
-  manageContentEl.classList.add("hidden");
-}
-
-function showManageContent() {
-  manageGateEl.classList.add("hidden");
-  manageContentEl.classList.remove("hidden");
-}
-
-function handlePasscodeExpired() {
-  sessionStorage.removeItem(MANAGE_PASSCODE_KEY);
-  showManageGate();
-  showExamGate();
-  showFormMsg(managePasscodeMsg, t("sessionExpired"), true);
-  showFormMsg(examPasscodeMsg, t("sessionExpired"), true);
-}
-
 function enterManageTab() {
-  if (isManageUnlocked()) {
-    showManageContent();
-    loadManageGrid();
-  } else {
-    showManageGate();
-  }
-}
-
-async function verifyPasscode(passcode) {
-  const res = await fetch("/api/verify-passcode", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ passcode }),
-  });
-  return res.ok;
-}
-
-managePasscodeForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const passcode = managePasscodeInput.value;
-  if (!passcode || !(await verifyPasscode(passcode))) {
-    showFormMsg(managePasscodeMsg, t("incorrectPasscode"), true);
-    return;
-  }
-
-  sessionStorage.setItem(MANAGE_PASSCODE_KEY, passcode);
-  managePasscodeInput.value = "";
-  showManageContent();
   loadManageGrid();
-});
+}
 
 // ---- Manage Points tab (card grid) ----
 
@@ -949,10 +887,9 @@ manageGrid.addEventListener("click", async (e) => {
     try {
       const res = await fetch(`/api/students/${id}/points`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...managePasscodeHeader() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ delta, reason }),
       });
-      if (res.status === 401) return handlePasscodeExpired();
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
 
@@ -1221,7 +1158,6 @@ async function handleDeleteStudent(studentId, studentName) {
   try {
     const res = await fetch(`/api/students/${studentId}`, {
       method: "DELETE",
-      headers: managePasscodeHeader(),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(translateServerError(data.error) || t("couldNotDeleteStudent"));
@@ -1359,48 +1295,14 @@ async function handleBulkAddStudents() {
 
 // ---- Exam Grades tab ----
 
-const examGateEl = document.getElementById("exam-gate");
-const examContentEl = document.getElementById("exam-content");
-const examPasscodeForm = document.getElementById("exam-passcode-form");
-const examPasscodeInput = document.getElementById("exam-passcode-input");
-const examPasscodeMsg = document.getElementById("exam-passcode-msg");
 const examClassSelect = document.getElementById("exam-class-select");
 const examFileInput = document.getElementById("exam-file-input");
 const examResultsEl = document.getElementById("exam-results");
 const examMsg = document.getElementById("exam-msg");
 
-function showExamGate() {
-  examGateEl.classList.remove("hidden");
-  examContentEl.classList.add("hidden");
-}
-
-function showExamContent() {
-  examGateEl.classList.add("hidden");
-  examContentEl.classList.remove("hidden");
-}
-
 function enterExamTab() {
-  if (isManageUnlocked()) {
-    showExamContent();
-    renderExamClassOptions();
-  } else {
-    showExamGate();
-  }
-}
-
-examPasscodeForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const passcode = examPasscodeInput.value;
-  if (!passcode || !(await verifyPasscode(passcode))) {
-    showFormMsg(examPasscodeMsg, t("incorrectPasscode"), true);
-    return;
-  }
-
-  sessionStorage.setItem(MANAGE_PASSCODE_KEY, passcode);
-  examPasscodeInput.value = "";
-  showExamContent();
   renderExamClassOptions();
-});
+}
 
 function renderExamClassOptions() {
   const previous = examClassSelect.value;
@@ -1446,10 +1348,8 @@ examFileInput.addEventListener("change", async (e) => {
   try {
     const res = await fetch(`/api/classes/${classId}/exam-import`, {
       method: "POST",
-      headers: managePasscodeHeader(),
       body: formData,
     });
-    if (res.status === 401) return handlePasscodeExpired();
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || t("couldNotImportExam"));
 
@@ -1695,10 +1595,9 @@ async function handleAwardSubmit(e) {
   try {
     const res = await fetch(`/api/students/${currentDetailId}/points`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...managePasscodeHeader() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ delta, reason }),
     });
-    if (res.status === 401) return handlePasscodeExpired();
     const data = await res.json();
     if (!res.ok) throw new Error(translateServerError(data.error) || t("couldNotUpdate"));
 
@@ -1728,10 +1627,9 @@ async function handleSetSubmit(e) {
   try {
     const res = await fetch(`/api/students/${currentDetailId}/points`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", ...managePasscodeHeader() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ points, reason: "Manual adjustment" }),
     });
-    if (res.status === 401) return handlePasscodeExpired();
     const data = await res.json();
     if (!res.ok) throw new Error(translateServerError(data.error) || t("couldNotSet"));
 
@@ -1751,9 +1649,7 @@ detailBody.addEventListener("click", async (e) => {
   try {
     const res = await fetch(`/api/history/${historyId}`, {
       method: "DELETE",
-      headers: managePasscodeHeader(),
     });
-    if (res.status === 401) return handlePasscodeExpired();
     if (!res.ok) throw new Error("Failed to undo");
     openDetailModal(currentDetailId);
     loadManageGrid();
@@ -1783,5 +1679,5 @@ populateSelect(document.getElementById("student-picker"), {
     }
   },
 });
-if (isManageUnlocked()) loadManageGrid();
+loadManageGrid();
 loadClasses();
